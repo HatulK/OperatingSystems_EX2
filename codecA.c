@@ -1,7 +1,8 @@
+#include <string.h>
 #include "stdio.h"
 
-void Aencode(char *string) {
-    for (int i = 0; string[i] != EOF; i++) {
+void codecA_func(char *string) {
+    for (size_t i = 0;i<strlen(string) ; i++) {
         if (string[i] >= 'a' && string[i] <= 'z') {
             string[i] = (char) (string[i] - 'z' + 'Z');
         } else if (string[i] >= 'A' && string[i] <= 'Z') {
@@ -12,6 +13,6 @@ void Aencode(char *string) {
 }
 
 
-void Adecode(char *str) {
-    Aencode(str);
+void codecA_decode(char *str) {
+    codecA_func(str);
 }

@@ -5,15 +5,15 @@
 #include <dlfcn.h>
 #include <stdlib.h>
 
-typedef char *(*func)(const char *);
+typedef void (*func)(const char *);
 
 
-void *getEncode(const char *codec) {
+void *getEncoder(const char *codec) {
     char name[512];
-    sprintf(name, "lib%s.so", codec);
+    sprintf(name, "%slib.so", codec);
     void *handler = dlopen(name, RTLD_LAZY);
     if (!handler) {
-        fprintf(stderr, "Error while loading library: %s\n", dlerror());
+        fprintf(stderr, "Error while loading library: %s_lib\n", dlerror());
         exit(1);
     }
     return handler;
@@ -21,12 +21,12 @@ void *getEncode(const char *codec) {
 
 void exeEncode(const char *name, const char *message, void *handler) {
     char function[512];
-    sprintf(function, "%s_encode", name);
+    sprintf(function, "%s_func", name);
     func encoder = dlsym(handler, function);
     if (!encoder) {
         fprintf(stderr, "Error while loading function: %s\n", dlerror());
         dlclose(handler);
-        exit(1);
+        exit(2);
     }
     encoder(message);
 }
@@ -35,11 +35,11 @@ int main(int argc, char *argv[]) {
     if (argc != 3) {
         fprintf(stderr, "Please make sure to follow the format as shown below:");
         fprintf(stderr, "%s <codec> <string to en/decode>\n", argv[0]);
-        return 1;
+        return -1;
     }
     char *codec = argv[1];
     char *string = argv[2];
-    void *handler = getEncode(codec);
+    void *handler = getEncoder(codec);
     exeEncode(codec, string, handler);
     dlclose(handler);
     return 0;

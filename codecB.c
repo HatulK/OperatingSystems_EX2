@@ -1,7 +1,8 @@
 #include <stdio.h>
+#include <string.h>
 
-void Bencode(char *str) {
-    for (int i = 0; str[i] != EOF; i++) {
+void codecB_func(char *str) {
+    for (size_t i = 0; i<strlen(str); i++) {
         unsigned char c = str[i];
         c += 3;
         str[i] = (char) c;
@@ -9,8 +10,8 @@ void Bencode(char *str) {
     printf("%s\n", str);
 }
 
-void Bdecode(char *str) {
-    for (int i = 0; str[i] != EOF; i++) {
+void codecB_decode(char *str) {
+    for (size_t i = 0; i<strlen(str); i++) {
         unsigned char c = str[i];
         c -= 3;
         str[i] = (char) c;
