@@ -1,204 +1,109 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
+#include <string.h>
 #include <sys/wait.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <stdbool.h>
 
-#define MAX_ARGS 10
-#define MAX_CMD_LEN 100
+#define MAX_ARGS 256
+#define MAX_command_LEN 1024
 
-struct Command {
-    char* name;
-    char* args[MAX_ARGS];
-    char* input_file;
-    char* output_file;
-    int background;
-    int num_args;
-};
-
-void handle_signal(int signal) {
-    // ignore the signal
-}
-
-void execute_command(struct Command* cmd) {
-    int in_fd = 0, out_fd = 0;
-    pid_t pid;
-    int pipefd[2];
-    int status;
-    int i, j;
-
-    // check for input redirection
-    if (cmd->input_file != NULL) {
-        in_fd = open(cmd->input_file, O_RDONLY);
-        if (in_fd == -1) {
-            perror("open");
-            exit(EXIT_FAILURE);
+void executeCommand(char **args, int input_fd, int output_fd) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        if (input_fd != STDIN_FILENO) {
+            dup2(input_fd, STDIN_FILENO);
+            close(input_fd);
         }
-        dup2(in_fd, STDIN_FILENO);
-        close(in_fd);
-    }
-
-    // check for output redirection
-    if (cmd->output_file != NULL) {
-        out_fd = open(cmd->output_file, O_WRONLY | O_CREAT | (cmd->background ? O_APPEND : O_TRUNC), 0644);
-        if (out_fd == -1) {
-            perror("open");
-            exit(EXIT_FAILURE);
+        if (output_fd != STDOUT_FILENO) {
+            dup2(output_fd, STDOUT_FILENO);
+            close(output_fd);
         }
-        dup2(out_fd, STDOUT_FILENO);
-        close(out_fd);
-    }
-
-    // check for piping
-    if (cmd->num_args > 1) {
-        for (i = 0; i < cmd->num_args - 1; i++) {
-            pipe(pipefd);
-            pid = fork();
-            if (pid == -1) {
-                perror("fork");
-                exit(EXIT_FAILURE);
-            }
-            else if (pid == 0) {
-                close(pipefd[0]);
-                if (i > 0) {
-                    dup2(pipefd[1], STDOUT_FILENO);
-                    close(pipefd[1]);
-                }
-                execvp(cmd->args[i], cmd->args + i);
-                perror("execvp");
-                exit(EXIT_FAILURE);
-            }
-            else {
-                close(pipefd[1]);
-                if (i == cmd->num_args - 2) {
-                    dup2(pipefd[0], STDIN_FILENO);
-                    close(pipefd[0]);
-                }
-            }
-        }
-    }
-
-    // execute the final command
-    pid = fork();
-    if (pid == -1) {
-        perror("fork");
-        exit(EXIT_FAILURE);
-    }
-    else if (pid == 0) {
-        execvp(cmd->args[cmd->num_args - 1], cmd->args + cmd->num_args - 1);
+        execvp(args[0], args);
         perror("execvp");
         exit(EXIT_FAILURE);
-    }
-    else {
-        if (!cmd->background) {
-            waitpid(pid, &status, 0);
-        }
+    } else if (pid < 0) {
+        perror("fork has been failed");
+    } else {
+        wait(NULL);
     }
 }
 
-int parse_command(char* line, struct Command* cmd) {
-    char* token;
-    int i = 0;
+void sigintHandler() {
+    printf("\nCTRL + c not allowed type exit to close the program.\n");
+    fflush(stdout);
+}
 
-    // check for background execution
-    cmd->background = (line[strlen(line) - 2] == '&');
-
-    // tokenize the command line
-    token = strtok(line, " \n");
-    while (token != NULL) {
-        if (strcmp(token, ">") == 0 || strcmp(token, ">>") == 0) {
-            // handle output redirection
-            if (cmd->output_file != NULL) {
-                fprintf(stderr, "syntax error: multiple output redirection\n");
-                return 0;
-            }
-            cmd->output_file = strtok(NULL, " \n");
-            if (cmd->output_file == NULL) {
-                fprintf(stderr, "syntax error: missing output file\n");
-                return 0;
-            }
-            if (strcmp(token, ">>") == 0) {
-                cmd->background = 1;
-            }
-        }
-        else if (strcmp(token, "<") == 0) {
-            // handle input redirection
-            if (cmd->input_file != NULL) {
-                fprintf(stderr, "syntax error: multiple input redirection\n");
-                return 0;
-            }
-            cmd->input_file = strtok(NULL, " \n");
-            if (cmd->input_file == NULL) {
-                fprintf(stderr, "syntax error: missing input file\n");
-                return 0;
-            }
-        }
-        else if (strcmp(token, "|") == 0) {
-            // handle piping
-            if (cmd->num_args >= MAX_ARGS) {
-                fprintf(stderr, "syntax error: too many arguments\n");
-                return 0;
-            }
-            cmd->args[cmd->num_args++] = NULL;
-        }
-        else {
-            // add argument to the command
-            if (cmd->num_args >= MAX_ARGS) {
-                fprintf(stderr, "syntax error: too many arguments\n");
-                return 0;
-            }
-            cmd->args[cmd->num_args++] = token;
-        }
-        token = strtok(NULL, " \n");
-    }
-    cmd->args[cmd->num_args] = NULL;
-
-// check for empty command
-    if (cmd->num_args == 0) {
+int getUserInput(char *command, int max_command_len) {
+    if (fgets(command, max_command_len, stdin) == NULL) {
         return 0;
     }
 
-// check for built-in commands
-    if (strcmp(cmd->args[0], "exit") == 0) {
-        exit(EXIT_SUCCESS);
+    size_t command_len = strlen(command);
+    if (command[command_len - 1] == '\n') {
+        command[command_len - 1] = '\0';
     }
-
     return 1;
-
 }
 
-int main() {
-    char line[MAX_CMD_LEN];
-    struct Command cmd;
-    struct sigaction sigact;
-    // set up the signal handler
-    sigact.sa_handler = handle_signal;
-    sigemptyset(&sigact.sa_mask);
-    sigact.sa_flags = 0;
-    sigaction(SIGINT, &sigact, NULL);
-
-    while (1) {
-        // print prompt
-        printf("stshell> ");
-        fflush(stdout);
-
-        // read command line
-        if (fgets(line, sizeof(line), stdin) == NULL) {
-            perror("fgets");
-            exit(EXIT_FAILURE);
+void processCommand(char *command) {
+    char *token;
+    char *args[MAX_ARGS];
+    int arg_count = 0;
+    int input_fd = STDIN_FILENO;
+    int output_fd = STDOUT_FILENO;
+    token = strtok(command, " ");
+    while (token != NULL) {
+        if (strcmp(token, "|") == 0) {
+            int pipe_fds[2];
+            if (pipe(pipe_fds) == -1) {
+                perror("pipe");
+                exit(EXIT_FAILURE);
+            }
+            executeCommand(args, input_fd, pipe_fds[1]);
+            close(pipe_fds[1]);
+            input_fd = pipe_fds[0];
+            arg_count = 0;
+        } else if (strcmp(token, ">") == 0) {
+            token = strtok(NULL, " ");
+            output_fd = open(token, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+            if (output_fd == -1) {
+                perror("open");
+                exit(EXIT_FAILURE);
+            }
+        } else if (strcmp(token, ">>") == 0) {
+            token = strtok(NULL, " ");
+            output_fd = open(token, O_WRONLY | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+            if (output_fd == -1) {
+                perror("open");
+                exit(EXIT_FAILURE);
+            }
+        } else if (strcmp(token, "exit") == 0) {
+            exit(EXIT_SUCCESS);
+        } else {
+            args[arg_count++] = token;
         }
 
-        // parse command line
-        if (!parse_command(line, &cmd)) {
-            continue;
-        }
-
-        // execute command
-        execute_command(&cmd);
-
-        // reset command
-        memset(&cmd, 0, sizeof(struct Command));
+        token = strtok(NULL, " ");
     }
+    args[arg_count] = NULL;
+    executeCommand(args, input_fd, output_fd);
+}
+
+
+int main() {
+    signal(SIGINT, sigintHandler);
+    char command[MAX_command_LEN];
+    while (true) {
+        printf("315800961_318417763_shell$ ");
+        fflush(stdout);
+        if (!getUserInput(command, MAX_command_LEN)) {
+            break;
+        }
+        processCommand(command);
+    }
+
+    return 0;
 }
