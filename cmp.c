@@ -22,17 +22,23 @@ int fileComperator(char *name1, char *name2, int v, int i) {
         char2 = tolower(char2);
         char1 = tolower(char1);
     }
-    while (char1 != EOF && char2 != EOF) {
-        char1 = fgetc(file1);
-        char2 = fgetc(file2);
+    while (char1 != EOF || char2 != EOF) { //not sure if || or &&
         if (i) {
-            char2 = tolower(char2);
-            char1 = tolower(char1);
+            if (char1 >= 'A' &&char1 <= 'Z') {
+                char1 = (char1 - 'Z' + 'z');
+            }
+            if (char2 >= 'A' &&char2 <= 'Z') {
+                char2 =  (char2 - 'Z' + 'z');
+            }
         }
         if (char1 != char2) {
             if (v) printf("Distinct\n");
+            fclose(file2);
+            fclose(file1);
             return 1;
         }
+        char1 = fgetc(file1);
+        char2 = fgetc(file2);
     }
     fclose(file2);
     fclose(file1);
@@ -53,13 +59,18 @@ void sendError() {
 
 void checkInput(int argc, char *const *argv, int *v, int *i) {
     int result, result2;
-    result2 = result = *v = *i = -1;
     if (argc < 3 || argc > 5) {
         sendError();
     }
     if (argc == 4) {
         result = strcmp("-v", argv[3]);
-        if (result == 0)(*v) = 1;
+        result2= strcmp("-i", argv[3]);
+        if (result == 0){
+            (*v) = 1;
+        }
+        else if(result2==0){
+            (*i)=1;
+        }
         else {
             sendError();
         }
