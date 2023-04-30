@@ -1,109 +1,187 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
-#include <fcntl.h>
-#include <stdbool.h>
 
-#define MAX_ARGS 256
-#define MAX_command_LEN 1024
-
-void executeCommand(char **args, int input_fd, int output_fd) {
-    pid_t pid = fork();
-    if (pid == 0) {
-        if (input_fd != STDIN_FILENO) {
-            dup2(input_fd, STDIN_FILENO);
-            close(input_fd);
-        }
-        if (output_fd != STDOUT_FILENO) {
-            dup2(output_fd, STDOUT_FILENO);
-            close(output_fd);
-        }
-        execvp(args[0], args);
-        perror("execvp");
-        exit(EXIT_FAILURE);
-    } else if (pid < 0) {
-        perror("fork has been failed");
-    } else {
-        wait(NULL);
+void handle_signal(int sig) {
+    if (sig == SIGINT) {
+        printf("\nCaught Ctrl+C, but not killing the shell.\n");
     }
 }
 
-void sigintHandler() {
-    printf("\nCTRL + c not allowed type exit to close the program.\n");
-    fflush(stdout);
-}
 
-int getUserInput(char *command, int max_command_len) {
-    if (fgets(command, max_command_len, stdin) == NULL) {
-        return 0;
-    }
-
-    size_t command_len = strlen(command);
-    if (command[command_len - 1] == '\n') {
-        command[command_len - 1] = '\0';
-    }
-    return 1;
-}
-
-void processCommand(char *command) {
+char **parse_input(char *input) {
+    int bufsize = 64, position = 0;
+    char **tokens = malloc(bufsize * sizeof(char *));
     char *token;
-    char *args[MAX_ARGS];
-    int arg_count = 0;
-    int input_fd = STDIN_FILENO;
-    int output_fd = STDOUT_FILENO;
-    token = strtok(command, " ");
+
+    if (!tokens) {
+        fprintf(stderr, "stshell: allocation error\n");
+        exit(EXIT_FAILURE);
+    }
+
+    token = strtok(input, " ");
     while (token != NULL) {
-        if (strcmp(token, "|") == 0) {
-            int pipe_fds[2];
-            if (pipe(pipe_fds) == -1) {
-                perror("pipe");
+        tokens[position] = token;
+        position++;
+
+        if (position >= bufsize) {
+            bufsize += 64;
+            tokens = realloc(tokens, bufsize * sizeof(char *));
+            if (!tokens) {
+                fprintf(stderr, "stshell: allocation error\n");
                 exit(EXIT_FAILURE);
             }
-            executeCommand(args, input_fd, pipe_fds[1]);
-            close(pipe_fds[1]);
-            input_fd = pipe_fds[0];
-            arg_count = 0;
-        } else if (strcmp(token, ">") == 0) {
-            token = strtok(NULL, " ");
-            output_fd = open(token, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
-            if (output_fd == -1) {
-                perror("open");
-                exit(EXIT_FAILURE);
-            }
-        } else if (strcmp(token, ">>") == 0) {
-            token = strtok(NULL, " ");
-            output_fd = open(token, O_WRONLY | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
-            if (output_fd == -1) {
-                perror("open");
-                exit(EXIT_FAILURE);
-            }
-        } else if (strcmp(token, "exit") == 0) {
-            exit(EXIT_SUCCESS);
-        } else {
-            args[arg_count++] = token;
         }
 
         token = strtok(NULL, " ");
     }
-    args[arg_count] = NULL;
-    executeCommand(args, input_fd, output_fd);
+    tokens[position] = NULL;
+    return tokens;
 }
 
 
-int main() {
-    signal(SIGINT, sigintHandler);
-    char command[MAX_command_LEN];
-    while (true) {
-        printf("315800961_318417763_shell$ ");
-        fflush(stdout);
-        if (!getUserInput(command, MAX_command_LEN)) {
-            break;
+void run_pipe_command(char **args1, char **args2) {
+    int pipefd[2];
+    pid_t p1, p2;
+
+    if (pipe(pipefd) == -1) {
+        perror("stshell");
+        exit(EXIT_FAILURE);
+    }
+    p1 = fork();
+    if (p1 == 0) {
+        // Child process 1
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+
+        if (execvp(args1[0], args1) == -1) {
+            perror("stshell");
+            exit(EXIT_FAILURE);
         }
-        processCommand(command);
+    } else if (p1 < 0) {
+        perror("stshell");
+        exit(EXIT_FAILURE);
     }
 
-    return 0;
+    p2 = fork();
+    if (p2 == 0) {
+        // Child process 2
+        close(pipefd[1]);
+        dup2(pipefd[0], STDIN_FILENO);
+        close(pipefd[0]);
+
+        if (execvp(args2[0], args2) == -1) {
+            perror("stshell");
+            exit(EXIT_FAILURE);
+        }
+    } else if (p2 < 0) {
+        perror("stshell");
+        exit(EXIT_FAILURE);
+    }
+
+    close(pipefd[0]);
+    close(pipefd[1]);
+    waitpid(p1, NULL, 0);
+    waitpid(p2, NULL, 0);
+}
+void handle_redirection(char **args) {
+    for (int i = 0; args[i] != NULL; i++) {
+        if (strcmp(args[i], ">") == 0 || strcmp(args[i], ">>") == 0) {
+            FILE *file;
+            if (args[i + 1] != NULL) {
+                if (strcmp(args[i], ">") == 0) {
+                    file = freopen(args[i + 1], "w", stdout);
+                } else {
+                    file = freopen(args[i + 1], "a", stdout);
+                }
+                if (file == NULL) {
+                    perror("stshell");
+                    exit(EXIT_FAILURE);
+                }
+                args[i] = NULL;
+            } else {
+                fprintf(stderr, "stshell: expected file after '%s'\n", args[i]);
+                exit(EXIT_FAILURE);
+            }
+            break;
+        }
+    }
+}
+void run_single_command(char **args) {
+    pid_t pid;
+    int status;
+
+    pid = fork();
+    if (pid == 0) {
+        // Child process
+        handle_redirection(args);
+
+        // Execute the command
+        if (execvp(args[0], args) == -1) {
+            perror("stshell");
+        }
+        exit(EXIT_FAILURE);
+    } else if (pid < 0) {
+        // Fork error
+        perror("stshell");
+    } else {
+        // Parent process
+        do {
+            waitpid(pid, &status, WUNTRACED);
+        } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+    }
+}
+void run_command(char **args) {
+    if (args[0] == NULL) {
+        // An empty command was entered
+        return;
+    }
+
+    if (strcmp(args[0], "exit") == 0) {
+        exit(EXIT_SUCCESS);
+    }
+
+    char **args_pipe = NULL;
+    for (int i = 0; args[i] != NULL; i++) {
+        if (strcmp(args[i], "|") == 0) {
+            args[i] = NULL;
+            args_pipe = &args[i + 1];
+            break;
+        }
+    }
+
+    if (args_pipe) {
+        run_pipe_command(args, args_pipe);
+    } else {
+        run_single_command(args);
+    }
+}
+
+int main() {
+    char input[1024];
+    char **args;
+    struct sigaction sa;
+    sa.sa_handler = handle_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
+    while (1) {
+        printf("314993247 shell > ");
+        fgets(input, 1024, stdin);
+        if (feof(stdin)) {
+            printf("\n");
+            exit(0);
+        }
+        input[strcspn(input, "\n")] = 0;
+        args = parse_input(input);
+        run_command(args);
+    }
 }
